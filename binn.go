@@ -9,17 +9,41 @@ const (
 	defaultInterval    = 1 * time.Second
 )
 
+type queue struct {
+	chs []chan *Bottle
+}
+
+func newQueue() *queue {
+	return &queue{
+		chs: []chan *Bottle{},
+	}
+}
+
+func (q *queue) push(ch chan *Bottle) {
+	q.chs = append(q.chs, ch)
+}
+
+func (q *queue) pop() chan *Bottle {
+	ch := q.chs[0]
+	q.chs = q.chs[1:]
+	return ch
+}
+
+func (q *queue) size() int {
+	return len(q.chs)
+}
+
 type Binn struct {
 	Storage  Keeper
 	Interval time.Duration
-	queue    []chan *Bottle
+	queue    *queue
 }
 
 func New(storage Keeper, interval time.Duration) *Binn {
 	bn := &Binn{
 		Storage:  storage,
 		Interval: interval,
-		queue:    []chan *Bottle{},
+		queue:    newQueue(),
 	}
 	bn.Run()
 	return bn
@@ -35,7 +59,7 @@ func (bn *Binn) Add(b *Bottle) error {
 
 func (bn *Binn) Get() <-chan *Bottle {
 	ch := make(chan *Bottle)
-	bn.queue = append(bn.queue, ch)
+	bn.queue.push(ch)
 	return ch
 }
 
@@ -47,15 +71,14 @@ func (bn *Binn) publishLoop() {
 	for {
 		select {
 		case <-time.After(bn.Interval):
-			if len(bn.queue) == 0 {
+			if bn.queue.size() == 0 {
 				break
 			}
-			ch := bn.queue[0]
-			bn.queue = bn.queue[1:]
 			b, err := bn.Storage.Get()
 			if err != nil {
 				break
 			}
+			ch := bn.queue.pop()
 			ch <- b
 		}
 	}
