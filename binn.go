@@ -9,12 +9,6 @@ const (
 	defaultInterval    = 1 * time.Second
 )
 
-type Engine struct {
-	Cfg     *Config
-	Storage Keeper
-	chs     []chan *Bottle
-}
-
 type Binn struct {
 	Storage  Keeper
 	Interval time.Duration
