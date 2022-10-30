@@ -18,16 +18,14 @@ type Engine struct {
 type Binn struct {
 	Storage  Keeper
 	Interval time.Duration
-	chs      []chan *Bottle
-	cnt      uint64
+	queue    []chan *Bottle
 }
 
 func New(storage Keeper, interval time.Duration) *Binn {
 	bn := &Binn{
 		Storage:  storage,
 		Interval: interval,
-		chs:      []chan *Bottle{},
-		cnt:      0,
+		queue:    []chan *Bottle{},
 	}
 	bn.Run()
 	return bn
@@ -41,8 +39,10 @@ func (bn *Binn) Add(b *Bottle) error {
 	return bn.Storage.Add(b)
 }
 
-func (bn *Binn) Subscribe(ch chan *Bottle) {
-	bn.chs = append(bn.chs, ch)
+func (bn *Binn) Get() <-chan *Bottle {
+	ch := make(chan *Bottle)
+	bn.queue = append(bn.queue, ch)
+	return ch
 }
 
 func (bn *Binn) Run() {
@@ -53,17 +53,16 @@ func (bn *Binn) publishLoop() {
 	for {
 		select {
 		case <-time.After(bn.Interval):
-			if len(bn.chs) == 0 {
+			if len(bn.queue) == 0 {
 				break
 			}
-			idx := bn.cnt % uint64(len(bn.chs))
-			ch := bn.chs[idx]
+			ch := bn.queue[0]
+			bn.queue = bn.queue[1:]
 			b, err := bn.Storage.Get()
 			if err != nil {
 				break
 			}
 			ch <- b
-			bn.cnt++
 		}
 	}
 }

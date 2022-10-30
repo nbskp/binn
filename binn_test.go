@@ -13,12 +13,10 @@ func TestBinn(t *testing.T) {
 		Id:  "1234abc",
 		Msg: "sample message",
 	})
-	ch := make(chan *Bottle)
-	bn.Subscribe(ch)
 	select {
 	case <-time.After(100 * time.Millisecond):
 		assert.Fail(t, "failed")
-	case b := <-ch:
+	case b := <-bn.Get():
 		assert.Equal(t, "1234abc", b.Id)
 		assert.Equal(t, "sample message", b.Msg)
 	}
