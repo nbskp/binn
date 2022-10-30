@@ -1,7 +1,6 @@
 package binn
 
 import (
-	"context"
 	"time"
 )
 
@@ -16,80 +15,58 @@ var (
 type Engine struct {
 	Cfg     *Config
 	Storage Keeper
-	inCh    chan *Bottle
-	outCh   chan *Bottle
+	chs     []chan *Bottle
 }
 
-func NewEngine(cfg *Config, storage *BottleStorage) *Engine {
-	return &Engine{
-		Cfg:     cfg,
-		Storage: storage,
-		inCh:    make(chan *Bottle),
-		outCh:   make(chan *Bottle),
+type Binn struct {
+	Storage  Keeper
+	Interval time.Duration
+	chs      []chan *Bottle
+	cnt      uint64
+}
+
+func New(storage Keeper, interval time.Duration) *Binn {
+	bn := &Binn{
+		Storage:  storage,
+		Interval: interval,
+		chs:      []chan *Bottle{},
+		cnt:      0,
 	}
+	bn.Run()
+	return bn
 }
 
-func DefaultEngine() *Engine {
-	cfg := &Config{DeliveryInterval: defaultDeliveryInterval}
-	storage := NewBottleStorage(defaultEngineStorageSize)
-	return NewEngine(cfg, storage)
+func Default() *Binn {
+	return New(NewBottleStorage(100), 1*time.Second)
 }
 
-type Gateway struct {
-	inCh  chan<- *Bottle
-	outCh <-chan *Bottle
+func (bn *Binn) Add(b *Bottle) error {
+	return bn.Storage.Add(b)
 }
 
-func (g *Gateway) Send(b *Bottle) {
-	g.inCh <- b
+func (bn *Binn) Subscribe(ch chan *Bottle) {
+	bn.chs = append(bn.chs, ch)
 }
 
-func (g *Gateway) Receive() <-chan *Bottle {
-	return g.outCh
+func (bn *Binn) Run() {
+	go bn.publishLoop()
 }
 
-func (e *Engine) NewGateway() *Gateway {
-	return &Gateway{
-		inCh:  e.inCh,
-		outCh: e.outCh,
-	}
-}
-
-func (e *Engine) Run(ctx context.Context) {
-	go func() {
-	Loop:
-		for {
-			select {
-			case <-ctx.Done():
-				break Loop
-			case b := <-e.inCh:
-				if err := e.Storage.Add(b); err != nil {
-					break
-				}
-			default:
+func (bn *Binn) publishLoop() {
+	for {
+		select {
+		case <-time.After(bn.Interval):
+			if len(bn.chs) == 0 {
 				break
 			}
-		}
-	}()
-
-	go func() {
-		t := time.NewTicker(e.Cfg.DeliveryInterval)
-		defer t.Stop()
-
-	Loop:
-		for {
-			select {
-			case <-ctx.Done():
-				break Loop
-			case <-t.C:
-				b, err := e.Storage.Get()
-				if err != nil {
-					break
-				}
-				e.outCh <- b
-			default:
+			idx := bn.cnt % uint64(len(bn.chs))
+			ch := bn.chs[idx]
+			b, err := bn.Storage.Get()
+			if err != nil {
 				break
 			}
+			ch <- b
+			bn.cnt++
 		}
-	}()
+	}
 }
