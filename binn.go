@@ -5,11 +5,8 @@ import (
 )
 
 const (
-	defaultEngineStorageSize = 100
-)
-
-var (
-	defaultDeliveryInterval = 5 * time.Second
+	defaultStorageSize = 100
+	defaultInterval    = 1 * time.Second
 )
 
 type Engine struct {
@@ -37,7 +34,7 @@ func New(storage Keeper, interval time.Duration) *Binn {
 }
 
 func Default() *Binn {
-	return New(NewBottleStorage(100), 1*time.Second)
+	return New(NewBottleStorage(defaultStorageSize), defaultInterval)
 }
 
 func (bn *Binn) Add(b *Bottle) error {
