@@ -1,6 +1,7 @@
 package binn
 
 import (
+	"errors"
 	"time"
 )
 
@@ -23,10 +24,13 @@ func (q *queue) push(ch chan *Bottle) {
 	q.chs = append(q.chs, ch)
 }
 
-func (q *queue) pop() chan *Bottle {
+func (q *queue) pop() (chan *Bottle, error) {
+	if q.size() == 0 {
+		return nil, errors.New("no channels")
+	}
 	ch := q.chs[0]
 	q.chs = q.chs[1:]
-	return ch
+	return ch, nil
 }
 
 func (q *queue) size() int {
@@ -37,6 +41,7 @@ type Binn struct {
 	Storage  Keeper
 	Interval time.Duration
 	queue    *queue
+	closed   chan struct{}
 }
 
 func New(storage Keeper, interval time.Duration) *Binn {
@@ -44,6 +49,7 @@ func New(storage Keeper, interval time.Duration) *Binn {
 		Storage:  storage,
 		Interval: interval,
 		queue:    newQueue(),
+		closed:   make(chan struct{}),
 	}
 	bn.Run()
 	return bn
@@ -53,23 +59,32 @@ func Default() *Binn {
 	return New(NewBottleStorage(defaultStorageSize), defaultInterval)
 }
 
-func (bn *Binn) Add(b *Bottle) error {
+func (bn *Binn) Publish(b *Bottle) error {
 	return bn.Storage.Add(b)
 }
 
-func (bn *Binn) Get() <-chan *Bottle {
-	ch := make(chan *Bottle)
+func (bn *Binn) Subscribe(ch chan *Bottle) error {
+	if cap(ch) == 0 {
+		return errors.New("channel capacity must be more than 0")
+	}
 	bn.queue.push(ch)
-	return ch
+	return nil
 }
 
 func (bn *Binn) Run() {
-	go bn.publishLoop()
+	go bn.deliveryLoop()
 }
 
-func (bn *Binn) publishLoop() {
+func (bn *Binn) Close() {
+	bn.closed <- struct{}{}
+}
+
+func (bn *Binn) deliveryLoop() {
+Loop:
 	for {
 		select {
+		case <-bn.closed:
+			break Loop
 		case <-time.After(bn.Interval):
 			if bn.queue.size() == 0 {
 				break
@@ -78,8 +93,34 @@ func (bn *Binn) publishLoop() {
 			if err != nil {
 				break
 			}
-			ch := bn.queue.pop()
+			ch, err := bn.queue.pop()
+			if err != nil {
+				bn.Storage.Add(b)
+				break
+			}
+			// once, if a channel length is more than 0(parent doesn't receive a bottle ex. process reads channel is killed),
+			// binn re-adds bottles in the channel and close the channel to notify parent of unsubscribing
+			if len(ch) > 0 {
+				bn.Storage.Add(b)
+				bn.readd(ch)
+				close(ch)
+				break
+			}
 			ch <- b
+			bn.queue.push(ch)
+		}
+	}
+}
+
+func (bn *Binn) readd(ch chan *Bottle) {
+	for {
+		select {
+		case b := <-ch:
+			bn.Storage.Add(b)
+		default:
+			if len(ch) == 0 {
+				return
+			}
 		}
 	}
 }
