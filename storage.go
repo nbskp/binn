@@ -37,6 +37,7 @@ func (s *BottleStorage) Add(b *Bottle) error {
 func (s *BottleStorage) Get() (*Bottle, error) {
 	s.mux.Lock()
 	if len(s.bottles) == 0 {
+		s.mux.Unlock()
 		return nil, fmt.Errorf("storage has no containers")
 	}
 	b := s.bottles[0]
