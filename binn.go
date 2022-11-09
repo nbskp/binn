@@ -124,3 +124,37 @@ func (bn *Binn) readd(ch chan *Bottle) {
 		}
 	}
 }
+
+type Receiver struct {
+	ch   chan *Bottle
+	once bool
+}
+
+func NewReceiver() *Receiver {
+	return &Receiver{
+		ch:   make(chan *Bottle, 1),
+		once: false,
+	}
+}
+
+func (r *Receiver) Receive(bn *Binn) chan *Bottle {
+	if !r.once {
+		bn.Subscribe(r.ch)
+		r.once = true
+		return r.ch
+	}
+	select {
+	case b, ok := <-r.ch:
+		if !ok {
+			r.ch = make(chan *Bottle, 1)
+			bn.Subscribe(r.ch)
+			return r.ch
+		}
+		if b != nil {
+			r.ch <- b
+		}
+		return r.ch
+	default:
+		return r.ch
+	}
+}
