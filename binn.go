@@ -11,30 +11,30 @@ const (
 )
 
 type queue struct {
-	chs []chan *Bottle
+	hs []handler
 }
 
 func newQueue() *queue {
 	return &queue{
-		chs: []chan *Bottle{},
+		hs: []handler{},
 	}
 }
 
-func (q *queue) push(ch chan *Bottle) {
-	q.chs = append(q.chs, ch)
+func (q *queue) push(h handler) {
+	q.hs = append(q.hs, h)
 }
 
-func (q *queue) pop() (chan *Bottle, error) {
+func (q *queue) pop() (handler, error) {
 	if q.size() == 0 {
 		return nil, errors.New("no channels")
 	}
-	ch := q.chs[0]
-	q.chs = q.chs[1:]
-	return ch, nil
+	h := q.hs[0]
+	q.hs = q.hs[1:]
+	return h, nil
 }
 
 func (q *queue) size() int {
-	return len(q.chs)
+	return len(q.hs)
 }
 
 type Binn struct {
@@ -63,11 +63,10 @@ func (bn *Binn) Publish(b *Bottle) error {
 	return bn.Storage.Add(b)
 }
 
-func (bn *Binn) Subscribe(ch chan *Bottle) error {
-	if cap(ch) == 0 {
-		return errors.New("channel capacity must be more than 0")
-	}
-	bn.queue.push(ch)
+type handler func(*Bottle)
+
+func (bn *Binn) Subscribe(fn handler) error {
+	bn.queue.push(fn)
 	return nil
 }
 
@@ -93,68 +92,13 @@ Loop:
 			if err != nil {
 				break
 			}
-			ch, err := bn.queue.pop()
+			fn, err := bn.queue.pop()
 			if err != nil {
 				bn.Storage.Add(b)
 				break
 			}
-			// once, if a channel length is more than 0(parent doesn't receive a bottle ex. process reads channel is killed),
-			// binn re-adds bottles in the channel and close the channel to notify parent of unsubscribing
-			if len(ch) > 0 {
-				bn.Storage.Add(b)
-				bn.readd(ch)
-				close(ch)
-				break
-			}
-			ch <- b
-			bn.queue.push(ch)
+			fn(b)
+			bn.queue.push(fn)
 		}
-	}
-}
-
-func (bn *Binn) readd(ch chan *Bottle) {
-	for {
-		select {
-		case b := <-ch:
-			bn.Storage.Add(b)
-		default:
-			if len(ch) == 0 {
-				return
-			}
-		}
-	}
-}
-
-type Receiver struct {
-	ch   chan *Bottle
-	once bool
-}
-
-func NewReceiver() *Receiver {
-	return &Receiver{
-		ch:   make(chan *Bottle, 1),
-		once: false,
-	}
-}
-
-func (r *Receiver) Receive(bn *Binn) chan *Bottle {
-	if !r.once {
-		bn.Subscribe(r.ch)
-		r.once = true
-		return r.ch
-	}
-	select {
-	case b, ok := <-r.ch:
-		if !ok {
-			r.ch = make(chan *Bottle, 1)
-			bn.Subscribe(r.ch)
-			return r.ch
-		}
-		if b != nil {
-			r.ch <- b
-		}
-		return r.ch
-	default:
-		return r.ch
 	}
 }
