@@ -63,7 +63,7 @@ func (bn *Binn) Publish(b *Bottle) error {
 	return bn.Storage.Add(b)
 }
 
-type handler func(*Bottle)
+type handler func(*Bottle) bool
 
 func (bn *Binn) Subscribe(fn handler) error {
 	bn.queue.push(fn)
@@ -97,7 +97,10 @@ Loop:
 				bn.Storage.Add(b)
 				break
 			}
-			fn(b)
+			if ok := fn(b); !ok {
+				bn.Storage.Add(b)
+				break
+			}
 			bn.queue.push(fn)
 		}
 	}
